@@ -1,0 +1,1358 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>石板连线 · 编辑器与求解器</title>
+<style>
+:root{
+  --cell: 68px;
+  --panel-w: 352px;
+  --gold: #ffd964;
+  --gold-deep: #d8a63a;
+  --ink: #f6e8d1;
+  --muted: #b99a75;
+  --line: #4a3020;
+  --ok: #8ee89a;
+  --bad: #ff8b7a;
+}
+*{box-sizing:border-box;}
+html,body{margin:0;min-height:100%;}
+body{
+  color:var(--ink);
+  font-family:"PingFang SC","Microsoft YaHei","Noto Sans SC",system-ui,sans-serif;
+  background:
+    radial-gradient(1100px 620px at 50% -8%, #5c3620 0%, #331e12 46%, #170d07 100%);
+  -webkit-font-smoothing:antialiased;
+}
+body::after{
+  content:"";position:fixed;inset:0;pointer-events:none;z-index:0;
+  background-image:
+    repeating-linear-gradient(90deg, rgba(255,220,160,.022) 0 1px, transparent 1px 90px),
+    repeating-linear-gradient(0deg, rgba(255,220,160,.015) 0 1px, transparent 1px 90px);
+}
+.page{position:relative;z-index:1;max-width:1180px;margin:0 auto;padding:30px 22px 48px;}
+.hero{margin-bottom:22px;}
+.kicker{
+  display:inline-block;font-size:11px;letter-spacing:.16em;color:#e6bd76;
+  border:1px solid rgba(230,189,118,.35);border-radius:999px;
+  padding:4px 10px;margin-bottom:12px;background:rgba(230,189,118,.06);
+}
+h1{
+  margin:0 0 8px;font-size:30px;line-height:1.15;font-weight:700;letter-spacing:.02em;
+  background:linear-gradient(180deg,#ffe9b6,#e4b55c 70%,#c98f38);
+  -webkit-background-clip:text;background-clip:text;color:transparent;
+  text-shadow:0 1px 0 rgba(0,0,0,.25);
+}
+h1 span{
+  font-size:15px;font-weight:500;letter-spacing:.08em;color:#c9a06a;
+  -webkit-text-fill-color:#c9a06a;margin-left:8px;
+}
+.lede{margin:0;color:#c0a17d;font-size:13px;line-height:1.7;max-width:640px;}
+.layout{display:grid;grid-template-columns:minmax(0,1fr) var(--panel-w);gap:22px;align-items:start;}
+@media (max-width: 940px){
+  .layout{grid-template-columns:minmax(0,1fr);}
+  .panel{order:2;}
+}
+
+/* ---------- 棋盘舞台 ---------- */
+.stage-col{display:flex;flex-direction:column;gap:12px;min-width:0;}
+.stage{
+  position:relative;border-radius:18px;padding:22px;
+  display:flex;align-items:center;justify-content:center;
+  background:
+    radial-gradient(120% 90% at 50% 0%, rgba(255,213,150,.16), transparent 60%),
+    linear-gradient(180deg,#7a4f2c,#603a20 55%,#4c2c17 100%);
+  border:1px solid #3a2313;
+  box-shadow:
+    inset 0 2px 0 rgba(255,225,175,.22),
+    inset 0 -14px 34px rgba(0,0,0,.42),
+    0 22px 44px rgba(0,0,0,.42);
+  overflow:auto;
+}
+.stage::before{
+  content:"";position:absolute;inset:8px;border-radius:12px;pointer-events:none;
+  border:1px solid rgba(255,215,160,.10);
+}
+.board{
+  display:grid;gap:5px;margin:auto;
+  grid-template-columns:repeat(var(--cols,4), var(--cell));
+}
+.cell{
+  position:relative;width:var(--cell);height:var(--cell);border-radius:9% 9% 9% 9%;
+  background:linear-gradient(145deg,#f0dbb4 0%,#ddc094 38%,#c8a172 72%,#b28252 100%);
+  border:1px solid rgba(112,74,36,.62);
+  box-shadow:
+    inset 0 2px 2px rgba(255,255,255,.5),
+    inset 0 -3px 7px rgba(92,55,22,.38),
+    0 3px 5px rgba(0,0,0,.34);
+  cursor:pointer;
+  user-select:none;-webkit-user-select:none;
+  transition:transform .12s ease, box-shadow .12s ease, filter .12s ease;
+}
+.cell::after{
+  content:"";position:absolute;inset:0;border-radius:inherit;pointer-events:none;
+  background:repeating-linear-gradient(135deg, rgba(120,78,36,.065) 0 2px, transparent 2px 8px);
+}
+.cell:hover{filter:brightness(1.06);}
+.cell.hole{
+  background:linear-gradient(160deg,#4a3020,#33200f);
+  border:1px dashed rgba(255,218,165,.17);
+  box-shadow:inset 0 7px 16px rgba(0,0,0,.55);
+  cursor:pointer;filter:none;
+}
+.cell.hole::after{display:none;}
+.cell.hole:hover{filter:brightness(1.15);}
+.cell.blank{filter:saturate(.82) brightness(.94);}
+.cell.locked .badge{opacity:1;}
+.cell.sel{
+  outline:3px solid var(--gold);
+  outline-offset:1px;
+  box-shadow:0 0 18px rgba(255,215,95,.55), inset 0 2px 2px rgba(255,255,255,.5);
+}
+.cell.dragging{opacity:.55;transform:scale(.95);}
+.cell.drop-hint{outline:3px dashed rgba(255,224,120,.9);outline-offset:1px;}
+.cell svg{position:absolute;inset:0;width:100%;height:100%;display:block;}
+.arm line{
+  stroke:#76522d;stroke-width:9.5;
+  filter:none;
+}
+.arm.lit line{
+  stroke:#ffe066;stroke-width:10;
+  filter:drop-shadow(0 0 5px rgba(255,214,66,.9)) drop-shadow(0 0 12px rgba(255,190,40,.45));
+}
+.node rect{
+  fill:#8a6135;
+  stroke:rgba(70,40,14,.5);
+  stroke-width:1.2;
+}
+.node.lit rect{
+  fill:#ffe066;
+  stroke:#fff3b0;
+  stroke-width:1.6;
+  filter:drop-shadow(0 0 6px rgba(255,214,66,.95)) drop-shadow(0 0 14px rgba(255,180,40,.5));
+}
+.badge{
+  position:absolute;right:3px;bottom:3px;z-index:2;
+  font-size:9px;line-height:1;padding:3px 4px;border-radius:4px;
+  color:#ffda8a;background:rgba(38,22,10,.72);
+  border:1px solid rgba(255,214,130,.32);
+  pointer-events:none;letter-spacing:.05em;
+}
+
+/* ---------- 状态条 ---------- */
+.statusbar{
+  display:flex;align-items:center;gap:9px;padding:10px 14px;border-radius:12px;
+  background:rgba(20,11,5,.45);border:1px solid rgba(255,214,150,.12);
+  font-size:13px;line-height:1.5;min-height:42px;
+}
+.dot{width:9px;height:9px;border-radius:50%;background:#8d6a45;box-shadow:0 0 0 rgba(0,0,0,0);flex:none;}
+.dot.ok{background:var(--ok);box-shadow:0 0 10px rgba(142,232,154,.65);}
+.dot.warn{background:var(--gold-deep);box-shadow:0 0 10px rgba(255,200,90,.45);}
+.status-text{color:#d9c0a0;}
+.stats{
+  color:#a98a66;font-size:11.5px;letter-spacing:.03em;padding-left:14px;
+  font-variant-numeric:tabular-nums;
+}
+
+/* ---------- 侧栏 ---------- */
+.panel{display:flex;flex-direction:column;gap:14px;}
+.card{
+  background:linear-gradient(180deg,rgba(58,36,21,.92),rgba(40,24,13,.92));
+  border:1px solid rgba(255,214,150,.13);
+  border-radius:14px;padding:15px 15px 16px;
+  box-shadow:inset 0 1px 0 rgba(255,225,180,.08), 0 12px 26px rgba(0,0,0,.28);
+}
+.card h3{
+  margin:0 0 11px;font-size:12px;font-weight:600;letter-spacing:.14em;color:#e2bd85;
+}
+.btn{
+  appearance:none;border:1px solid rgba(255,214,150,.24);border-radius:9px;
+  background:linear-gradient(180deg,#5a3a22,#472b18);
+  color:#f1dcbb;font-size:13px;padding:9px 12px;cursor:pointer;font-family:inherit;
+  transition:filter .15s ease, transform .08s ease, border-color .15s ease;
+}
+.btn:hover{filter:brightness(1.12);border-color:rgba(255,214,150,.42);}
+.btn:active{transform:translateY(1px);}
+.btn.primary{
+  background:linear-gradient(180deg,#ffdc72,#e3ac3c 55%,#c68a25);
+  border-color:#f5d178;color:#3a2208;font-weight:700;letter-spacing:.06em;
+  box-shadow:0 6px 16px rgba(226,170,55,.28), inset 0 1px 0 rgba(255,255,255,.55);
+}
+.btn.primary:hover{filter:brightness(1.05);}
+.btn.ghost{background:rgba(255,214,150,.055);}
+.btn.small{font-size:12px;padding:7px 10px;}
+.btn:disabled{opacity:.45;cursor:not-allowed;}
+.size-row{display:flex;align-items:flex-end;gap:9px;}
+.size-row label{
+  flex:1;display:flex;align-items:center;gap:6px;font-size:12px;color:#c9a97f;
+}
+.size-row input{
+  width:56px;background:#24150b;border:1px solid rgba(255,214,150,.2);border-radius:7px;
+  color:#f6e7cd;padding:7px 8px;font-size:13px;font-family:inherit;outline:none;
+}
+.size-row input:focus{border-color:rgba(255,214,150,.55);}
+.btn-row{display:flex;gap:8px;margin-top:10px;}
+.btn-row .btn{flex:1;}
+
+.tool-row{display:flex;gap:8px;margin-bottom:11px;}
+.tool{
+  flex:1;display:flex;align-items:center;justify-content:center;gap:7px;
+  padding:8px 10px;border-radius:9px;cursor:pointer;font-family:inherit;
+  border:1px solid rgba(255,214,150,.16);background:rgba(255,214,150,.045);
+  color:#d6b995;font-size:12.5px;transition:all .15s ease;
+}
+.tool .tool-icon{font-size:14px;color:#e9c886;}
+.tool:hover{background:rgba(255,214,150,.1);}
+.tool.active{
+  background:linear-gradient(180deg,rgba(255,214,100,.24),rgba(255,190,60,.12));
+  border-color:rgba(255,214,110,.6);color:#ffe6ad;
+  box-shadow:0 0 14px rgba(255,200,70,.12) inset;
+}
+.palette{
+  display:grid;grid-template-columns:repeat(4,1fr);gap:7px;
+}
+.shape{
+  position:relative;aspect-ratio:1;min-width:0;padding:0;cursor:pointer;
+  border-radius:9px;border:1px solid rgba(112,74,36,.55);
+  background:linear-gradient(145deg,#efd9b1,#d4b484 40%,#bd9260 100%);
+  box-shadow:inset 0 1px 1px rgba(255,255,255,.5), inset 0 -2px 5px rgba(90,55,22,.35);
+  transition:transform .12s ease, box-shadow .12s ease;
+  -webkit-user-drag:element;
+}
+.shape svg{position:absolute;inset:0;width:100%;height:100%;}
+.shape .arm.lit line{stroke:#e7b740;stroke-width:10;filter:none;}
+.shape .node.lit rect{fill:#f0ca62;stroke:#f7dfa0;filter:none;}
+.shape:hover{transform:translateY(-1px);box-shadow:0 4px 10px rgba(0,0,0,.35), inset 0 1px 1px rgba(255,255,255,.5);}
+.shape.active{
+  outline:3px solid var(--gold);outline-offset:1px;
+  box-shadow:0 0 16px rgba(255,214,90,.5), inset 0 1px 1px rgba(255,255,255,.5);
+}
+.shape .blank-mark{
+  position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  color:rgba(90,56,26,.55);font-size:10px;letter-spacing:.1em;pointer-events:none;
+}
+.hint{margin:10px 0 0;color:#a4855f;font-size:11.5px;line-height:1.65;}
+
+.result{margin-top:11px;font-size:12.5px;color:#d3b794;}
+.result-title{font-size:13px;font-weight:600;margin-bottom:6px;letter-spacing:.03em;}
+.result-title.ok{color:#ffe08b;}
+.result-title.bad{color:var(--bad);}
+.result-note{color:#a98a66;font-size:11.5px;line-height:1.65;}
+.steps{display:flex;flex-direction:column;gap:5px;margin-top:10px;max-height:206px;overflow:auto;padding-right:2px;}
+.step{
+  text-align:left;font-family:inherit;font-size:11.5px;padding:7px 9px;border-radius:7px;
+  border:1px solid rgba(255,214,150,.14);background:rgba(255,214,150,.04);color:#d6bb98;
+  cursor:pointer;font-variant-numeric:tabular-nums;transition:all .13s ease;
+}
+.step:hover{background:rgba(255,214,150,.1);}
+.step.active{
+  border-color:rgba(255,214,110,.7);color:#ffe8b2;
+  background:linear-gradient(90deg,rgba(255,210,90,.2),rgba(255,190,60,.07));
+}
+.result-actions{display:flex;gap:8px;margin-top:11px;}
+.result-actions .btn{flex:1;}
+
+.help ul{margin:0;padding-left:16px;color:#a98a66;font-size:11.5px;line-height:1.9;}
+.help li::marker{color:#7c5c3c;}
+
+.toast{
+  position:fixed;left:50%;bottom:34px;transform:translate(-50%,16px);
+  background:rgba(30,17,8,.94);border:1px solid rgba(255,214,140,.35);
+  color:#ffe6b0;font-size:12.5px;padding:9px 16px;border-radius:999px;
+  opacity:0;pointer-events:none;transition:all .2s ease;z-index:50;
+  box-shadow:0 10px 26px rgba(0,0,0,.45);
+}
+.toast.show{opacity:1;transform:translate(-50%,0);}
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="hero">
+    <div class="kicker">单文件 · 无需安装 · 双击即可运行</div>
+    <h1>石板连线 <span>编辑器 &amp; 求解器</span></h1>
+    <p class="lede">交换石板，让每一条通路都接到相邻格的通路，并让所有有通路的石板连成一整片。求解器会把最终布局和逐步交换方案一起给出。</p>
+  </header>
+
+  <div class="layout">
+    <main class="stage-col">
+      <div class="stage"><div id="board" class="board"></div></div>
+      <div class="statusbar"><span id="statusDot" class="dot"></span><span id="statusText" class="status-text"></span></div>
+      <div id="stats" class="stats"></div>
+    </main>
+
+    <aside class="panel">
+      <section class="card">
+        <h3>棋盘尺寸</h3>
+        <div class="size-row">
+          <label>行 <input id="inRows" type="number" min="2" max="8" value="5"></label>
+          <label>列 <input id="inCols" type="number" min="2" max="8" value="4"></label>
+          <button id="btnRebuild" class="btn small">重建</button>
+        </div>
+        <div class="btn-row">
+          <button id="btnSample" class="btn ghost">载入示例</button>
+          <button id="btnRandom" class="btn ghost">随机谜题</button>
+          <button id="btnClear" class="btn ghost">清空</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h3>方块调色板</h3>
+        <div class="tool-row">
+          <button class="tool active" data-tool="swap"><span class="tool-icon">⇄</span>交换</button>
+          <button class="tool" data-tool="erase"><span class="tool-icon">▢</span>空位</button>
+        </div>
+        <div id="palette" class="palette"></div>
+        <p class="hint">点选方块后点击格子放置；也可以直接把方块拖进格子。</p>
+      </section>
+
+      <section class="card">
+        <h3>求解</h3>
+        <button id="btnSolve" class="btn primary">计算答案</button>
+        <div id="result" class="result"></div>
+      </section>
+
+      <section class="card help">
+        <h3>操作</h3>
+        <ul>
+          <li>拖动一个石板到另一个石板：交换位置</li>
+          <li>在「交换」工具下，依次点击两个格子：交换</li>
+          <li>右键格子：清空为空位</li>
+          <li>Shift + 点击：锁定 / 解锁石板</li>
+          <li>无通路石板自动固定，不能参与交换</li>
+        </ul>
+      </section>
+    </aside>
+  </div>
+</div>
+<div id="toast" class="toast"></div>
+
+<script>
+/* ============================================================
+   基础模型
+   方向用位掩码表示：上=1 右=2 下=4 左=8
+   ============================================================ */
+const U = 1, R = 2, D = 4, L = 8;
+
+const DIRS = [
+  { bit: U, opp: D, dr: -1, dc: 0, name: '上' },
+  { bit: R, opp: L, dr: 0,  dc: 1, name: '右' },
+  { bit: D, opp: U, dr: 1,  dc: 0, name: '下' },
+  { bit: L, opp: R, dr: 0,  dc: -1, name: '左' }
+];
+
+function popcount(x) {
+  let n = 0;
+  while (x) { n += x & 1; x >>= 1; }
+  return n;
+}
+
+function neighborOf(i, d, rows, cols) {
+  const r = Math.floor(i / cols) + DIRS[d].dr;
+  const c = (i % cols) + DIRS[d].dc;
+  if (r < 0 || r >= rows || c < 0 || c >= cols) return -1;
+  return r * cols + c;
+}
+
+function armName(type) {
+  if (type === 0) return '无通路';
+  const names = DIRS.filter(d => type & d.bit).map(d => d.name);
+  return names.length ? names.join(' / ') : '无通路';
+}
+
+function now() {
+  return (typeof performance !== 'undefined' ? performance.now() : Date.now());
+}
+
+/* ============================================================
+   局面分析：哪些通路端已接通、是否整体连通
+   ============================================================ */
+function analyze(cells, rows, cols) {
+  const n = rows * cols;
+  const arms = new Array(n).fill(0);
+  let tiles = 0;
+
+  for (let i = 0; i < n; i++) {
+    const t = cells[i] ? cells[i].type : null;
+    if (t !== null && t !== undefined) tiles++;
+    arms[i] = (t === null || t === undefined || t === 0) ? 0 : t;
+  }
+
+  const lit = new Array(n).fill(0);
+  let unmatched = 0, armsTotal = 0, armCells = 0;
+
+  for (let i = 0; i < n; i++) {
+    if (!arms[i]) continue;
+    armCells++;
+    for (let d = 0; d < 4; d++) {
+      const dir = DIRS[d];
+      if (!(arms[i] & dir.bit)) continue;
+      armsTotal++;
+      const j = neighborOf(i, d, rows, cols);
+      if (j < 0 || !(arms[j] & dir.opp)) { unmatched++; continue; }
+      lit[i] |= dir.bit;
+      lit[j] |= dir.opp;
+    }
+  }
+
+  // 并查集统计连通片数（只走已经接通的边）
+  const parent = new Int32Array(n);
+  for (let i = 0; i < n; i++) parent[i] = i;
+  const find = (x) => {
+    while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; }
+    return x;
+  };
+  const union = (a, b) => {
+    a = find(a); b = find(b);
+    if (a !== b) parent[a] = b;
+  };
+  for (let i = 0; i < n; i++) {
+    if (!arms[i]) continue;
+    for (let d = 0; d < 4; d++) {
+      const dir = DIRS[d];
+      if (dir.bit >= dir.opp) continue; // 每一对相邻格只处理一次
+      if (!(arms[i] & dir.bit)) continue;
+      const j = neighborOf(i, d, rows, cols);
+      if (j >= 0 && (arms[j] & dir.opp)) union(i, j);
+    }
+  }
+
+  const roots = new Set();
+  for (let i = 0; i < n; i++) if (arms[i]) roots.add(find(i));
+  const compCount = roots.size;
+
+  return {
+    lit, unmatched, armsTotal, armCells, tiles, compCount,
+    solved: unmatched === 0 && armCells > 0 && compCount === 1
+  };
+}
+
+/* ============================================================
+   求解器
+   只做「交换」：石板方向不变，只是换位置。
+   固定石板（手动锁定 / 无通路）留在原地。
+   目标：所有通路端成对接通，且所有有通路的石板连成一片。
+   ============================================================ */
+const LIMIT_TOKEN = { limit: true };
+
+function solveBoard(cells, rows, cols, limits) {
+  const opts = Object.assign({ nodeLimit: 1500000, timeLimitMs: 6000 }, limits || {});
+  const n = rows * cols;
+
+  const types = new Array(n);
+  const isVoid = new Array(n);
+  const fixed = new Int32Array(n).fill(-1);
+  const fixedTiles = [];
+  const movable = [];
+  const counts = new Int32Array(16);
+
+  for (let i = 0; i < n; i++) {
+    const cell = cells[i] || { type: null };
+    const t = cell.type;
+    types[i] = t;
+    if (t === null || t === undefined || t === 0) { isVoid[i] = true; continue; }
+    isVoid[i] = false;
+    if (cell.locked) {
+      fixed[i] = t;
+      fixedTiles.push(i);
+    } else {
+      movable.push(i);
+      counts[t]++;
+    }
+  }
+
+  const nbr = new Int32Array(n * 4).fill(-1);
+  const allow = new Int32Array(n);
+  for (let i = 0; i < n; i++) {
+    for (let d = 0; d < 4; d++) {
+      const j = neighborOf(i, d, rows, cols);
+      nbr[i * 4 + d] = j;
+      if (j >= 0 && !isVoid[j]) allow[i] |= DIRS[d].bit;
+    }
+  }
+
+  // 固定石板上的通路必须能直接对上，否则无解
+  for (const i of fixedTiles) {
+    for (let d = 0; d < 4; d++) {
+      if (!(fixed[i] & DIRS[d].bit)) continue;
+      const j = nbr[i * 4 + d];
+      if (j < 0 || isVoid[j]) return { ok: false, reason: 'fixed', index: i };
+      if (fixed[j] >= 0 && !(fixed[j] & DIRS[d].opp)) return { ok: false, reason: 'fixed', index: i };
+    }
+  }
+
+  let armTotal = 0, armCells = 0;
+  for (let i = 0; i < n; i++) {
+    if (isVoid[i]) continue;
+    armCells++;
+    armTotal += popcount(types[i]);
+  }
+
+  // 每条通路都要成对，所以总数必须是偶数
+  if (armTotal % 2 !== 0) return { ok: false, reason: 'parity' };
+  // 连通所有石板至少要 格数-1 条边
+  if (armTotal / 2 < armCells - 1) return { ok: false, reason: 'edges' };
+
+  const assign = new Int32Array(n).fill(-1);
+  for (const i of fixedTiles) assign[i] = fixed[i];
+
+  const rem = movable.slice();
+  let nodes = 0;
+  const t0 = now();
+
+  function staticOK(i, t) {
+    if ((t & ~allow[i]) !== 0) return false;
+    for (let d = 0; d < 4; d++) {
+      const j = nbr[i * 4 + d];
+      if (j < 0) continue;
+      const ft = fixed[j];
+      if (ft < 0) continue;
+      const want = (t & DIRS[d].bit) !== 0;
+      const rev = (ft & DIRS[d].opp) !== 0;
+      if (want !== rev) return false;
+    }
+    return true;
+  }
+
+  function compat(i, t) {
+    for (let d = 0; d < 4; d++) {
+      const j = nbr[i * 4 + d];
+      if (j < 0) continue;
+      const at = assign[j];
+      if (at <= 0) continue;
+      const want = (t & DIRS[d].bit) !== 0;
+      const rev = (at & DIRS[d].opp) !== 0;
+      if (want !== rev) return false;
+    }
+    return true;
+  }
+
+  function candidateTypes(i) {
+    const out = [];
+    for (let t = 1; t < 16; t++) {
+      if (counts[t] === 0) continue;
+      if (!staticOK(i, t)) continue;
+      if (!compat(i, t)) continue;
+      out.push(t);
+    }
+    return out;
+  }
+
+  function feasibleCell(i) {
+    for (let t = 1; t < 16; t++) {
+      if (counts[t] === 0) continue;
+      if (!staticOK(i, t)) continue;
+      if (compat(i, t)) return true;
+    }
+    return false;
+  }
+
+  // 已经放好的某一片如果没有通向未放置格子的通路端，就永远接不进整体
+  function componentPrune() {
+    if (rem.length === 0) return false;
+    const parent = new Int32Array(n);
+    for (let i = 0; i < n; i++) parent[i] = i;
+    const find = (x) => {
+      while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; }
+      return x;
+    };
+    const union = (a, b) => {
+      a = find(a); b = find(b);
+      if (a !== b) parent[a] = b;
+    };
+
+    const placed = [];
+    for (let i = 0; i < n; i++) if (assign[i] > 0) placed.push(i);
+
+    for (const i of placed) {
+      const t = assign[i];
+      for (let d = 0; d < 4; d++) {
+        if (DIRS[d].bit >= DIRS[d].opp) continue;
+        if (!(t & DIRS[d].bit)) continue;
+        const j = nbr[i * 4 + d];
+        if (j >= 0 && assign[j] > 0 && (assign[j] & DIRS[d].opp)) union(i, j);
+      }
+    }
+
+    const open = new Map();
+    for (const i of placed) {
+      const root = find(i);
+      if (!open.has(root)) open.set(root, false);
+      for (let d = 0; d < 4; d++) {
+        if (!(assign[i] & DIRS[d].bit)) continue;
+        const j = nbr[i * 4 + d];
+        if (j >= 0 && assign[j] < 0 && !isVoid[j]) open.set(root, true);
+      }
+    }
+
+    for (const hasOpen of open.values()) if (!hasOpen) return true;
+    return false;
+  }
+
+  function buildSolutionTypes() {
+    return types.map((t, i) => {
+      if (t === null || t === undefined) return null;
+      if (t === 0) return 0;
+      return assign[i];
+    });
+  }
+
+  function dfs() {
+    nodes++;
+    if (nodes > opts.nodeLimit) throw LIMIT_TOKEN;
+    if ((nodes & 4095) === 0 && now() - t0 > opts.timeLimitMs) throw LIMIT_TOKEN;
+
+    if (rem.length === 0) {
+      const sol = buildSolutionTypes();
+      const check = analyze(sol.map(t => ({ type: t })), rows, cols);
+      return check.solved ? sol : null;
+    }
+
+    let pickPos = -1, pickList = null;
+    for (let k = 0; k < rem.length; k++) {
+      const i = rem[k];
+      const list = candidateTypes(i);
+      if (list.length === 0) return null;
+      if (!pickList || list.length < pickList.length) {
+        pickList = list;
+        pickPos = k;
+      }
+    }
+
+    const i = rem[pickPos];
+    for (const t of pickList) {
+      assign[i] = t;
+      counts[t]--;
+      rem.splice(pickPos, 1);
+
+      let ok = true;
+      for (let d = 0; d < 4; d++) {
+        const j = nbr[i * 4 + d];
+        if (j < 0 || isVoid[j] || assign[j] > 0) continue;
+        if (!feasibleCell(j)) { ok = false; break; }
+      }
+
+      if (ok && !componentPrune()) {
+        const res = dfs();
+        if (res) return res;
+      }
+
+      assign[i] = -1;
+      counts[t]++;
+      rem.splice(pickPos, 0, i);
+    }
+
+    return null;
+  }
+
+  let sol = null;
+  try {
+    sol = dfs();
+  } catch (e) {
+    if (e === LIMIT_TOKEN) return { ok: false, reason: 'limit', nodes };
+    throw e;
+  }
+  if (!sol) return { ok: false, reason: 'search', nodes };
+  return { ok: true, types: sol, nodes };
+}
+
+/* ============================================================
+   把最终布局换算成「从当前布局出发」的交换步骤
+   相同形状的石板可以互换，所以按形状做匹配
+   ============================================================ */
+function buildSteps(initialCells, solTypes, rows, cols) {
+  const n = initialCells.length;
+  const cur = initialCells.map(c => c.type);
+  const target = solTypes.slice();
+  const movable = [];
+
+  for (let i = 0; i < n; i++) {
+    const c = initialCells[i];
+    if (c.type !== null && c.type !== undefined && c.type > 0 && !c.locked) movable.push(i);
+  }
+
+  const steps = [];
+  let guard = 0;
+  while (guard++ <= n * n) {
+    // 只在“当前还不正确”的格子之间交换，已经正确的格子不要碰
+    const wrong = movable.filter(i => cur[i] !== target[i]);
+    if (wrong.length === 0) break;
+    const bad = wrong[0];
+
+    let pick = -1;
+    // 优先找「互相换一下就都对」的两格
+    for (const j of wrong) {
+      if (j !== bad && cur[j] === target[bad] && cur[bad] === target[j]) { pick = j; break; }
+    }
+    if (pick < 0) {
+      for (const j of wrong) {
+        if (j !== bad && cur[j] === target[bad]) { pick = j; break; }
+      }
+    }
+    if (pick < 0) break;
+
+    const tmp = cur[bad];
+    cur[bad] = cur[pick];
+    cur[pick] = tmp;
+    steps.push({ a: bad, b: pick });
+  }
+
+  const ok = movable.every(i => cur[i] === target[i]);
+  return { steps, ok };
+}
+
+/* ============================================================
+   随机谜题生成：先生成一个合法连通布局，再打乱石板
+   ============================================================ */
+function buildRandomArrangement(rows, cols, rnd) {
+  const n = rows * cols;
+  const arms = new Array(n).fill(0);
+  const visited = new Array(n).fill(false);
+
+  const start = Math.floor(rnd() * n);
+  const stack = [start];
+  visited[start] = true;
+
+  while (stack.length) {
+    const cur = stack[stack.length - 1];
+    const opts = [];
+    for (let d = 0; d < 4; d++) {
+      const j = neighborOf(cur, d, rows, cols);
+      if (j >= 0 && !visited[j]) opts.push([d, j]);
+    }
+    if (!opts.length) { stack.pop(); continue; }
+    const [d, j] = opts[Math.floor(rnd() * opts.length)];
+    arms[cur] |= DIRS[d].bit;
+    arms[j] |= DIRS[d].opp;
+    visited[j] = true;
+    stack.push(j);
+  }
+
+  // 再加一些额外连接，形成回路
+  for (let i = 0; i < n; i++) {
+    for (let d = 0; d < 2; d++) { // 只处理上、右，避免重复
+      const j = neighborOf(i, d, rows, cols);
+      if (j < 0) continue;
+      if (arms[i] & DIRS[d].bit) continue;
+      if (arms[j] & DIRS[d].opp) continue;
+      if (rnd() < 0.22) {
+        arms[i] |= DIRS[d].bit;
+        arms[j] |= DIRS[d].opp;
+      }
+    }
+  }
+
+  const vals = arms.slice();
+  for (let k = vals.length - 1; k > 0; k--) {
+    const r = Math.floor(rnd() * (k + 1));
+    const t = vals[k]; vals[k] = vals[r]; vals[r] = t;
+  }
+
+  return vals.map(t => ({ type: t, locked: false }));
+}
+
+function generateRandomCells(rows, cols) {
+  let last = null;
+  for (let attempt = 0; attempt < 8; attempt++) {
+    last = buildRandomArrangement(rows, cols, Math.random);
+    if (!analyze(last, rows, cols).solved) return last;
+  }
+  return last;
+}
+
+/* ============================================================
+   示例布局（根据截图「第 6 关」的形状整理出的一个合法解，
+   载入时会把石板随机打乱）
+   ============================================================ */
+function mulberry32(seed) {
+  return function () {
+    seed |= 0; seed = (seed + 0x6D2B79F5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+const SAMPLE_SOLVED = [
+  [null, 6, 10, 12],
+  [4, 7, 8, 5],
+  [5, 7, 10, 9],
+  [5, 5, null, null],
+  [3, 9, null, null]
+];
+
+function makeSampleCells() {
+  const flat = SAMPLE_SOLVED.flat();
+  const solvedVals = flat.filter(t => t !== null);
+  const rnd = mulberry32(20261107);
+
+  for (let attempt = 0; attempt < 12; attempt++) {
+    const vals = solvedVals.slice();
+    for (let k = vals.length - 1; k > 0; k--) {
+      const r = Math.floor(rnd() * (k + 1));
+      const t = vals[k]; vals[k] = vals[r]; vals[r] = t;
+    }
+    let p = 0;
+    const cells = flat.map(t => t === null ? { type: null, locked: false } : { type: vals[p++], locked: false });
+    if (!analyze(cells, 5, 4).solved) return cells;
+  }
+  let p = 0;
+  return flat.map(t => t === null ? { type: null, locked: false } : { type: solvedVals[p++], locked: false });
+}
+
+/* ============================================================
+   界面
+   ============================================================ */
+const S = {
+  rows: 5,
+  cols: 4,
+  cells: [],
+  tool: 'swap',
+  paintType: 6,
+  selected: null,
+  snapshot: null,
+  solutionCells: null,
+  solTypes: null,
+  steps: [],
+  previewCells: null,
+  stepIndex: -1,
+  busy: false
+};
+
+function $(id) { return document.getElementById(id); }
+
+function editable() {
+  return !S.solutionCells;
+}
+
+function resetSolution() {
+  S.snapshot = null;
+  S.solutionCells = null;
+  S.solTypes = null;
+  S.steps = [];
+  S.previewCells = null;
+  S.stepIndex = -1;
+  S.selected = null;
+}
+
+function displayCells() {
+  if (S.previewCells) return S.previewCells;
+  if (S.solutionCells) return S.solutionCells;
+  return S.cells;
+}
+
+function tileSVG(type, litMask) {
+  if (!type) return '';
+  const arms = [];
+  for (const d of DIRS) {
+    if (!(type & d.bit)) continue;
+    const x = d.dc * 50, y = d.dr * 50;
+    const on = (litMask & d.bit) !== 0;
+    arms.push(`<g class="arm${on ? ' lit' : ''}"><line x1="0" y1="0" x2="${x}" y2="${y}"></line></g>`);
+  }
+  const nodeOn = type > 0 && litMask !== 0;
+  return `<svg class="tile" viewBox="-50 -50 100 100" preserveAspectRatio="none">${arms.join('')}<g class="node${nodeOn ? ' lit' : ''}"><rect x="-8.5" y="-8.5" width="17" height="17" transform="rotate(45)" rx="1.2"></rect></g></svg>`;
+}
+
+function coord(i) {
+  const r = Math.floor(i / S.cols) + 1;
+  const c = (i % S.cols) + 1;
+  return `(${r},${c})`;
+}
+
+function renderBoard() {
+  const board = $('board');
+  const cells = displayCells();
+  const a = analyze(cells, S.rows, S.cols);
+  board.style.setProperty('--cols', S.cols);
+
+  const parts = [];
+  for (let i = 0; i < cells.length; i++) {
+    const c = cells[i] || { type: null };
+    const t = c.type;
+    const hole = (t === null || t === undefined);
+
+    let cls = 'cell';
+    if (hole) cls += ' hole';
+    else if (t === 0) cls += ' blank';
+    else if (c.locked) cls += ' locked';
+    if (S.selected === i && editable()) cls += ' sel';
+
+    let inner = '';
+    if (!hole && t > 0) inner = tileSVG(t, a.lit[i] || 0);
+
+    let badge = '';
+    if (!hole && t === 0) badge = '<span class="badge">固</span>';
+    else if (!hole && c.locked) badge = '<span class="badge">锁</span>';
+
+    const title = hole ? '空位' : `${armName(t)}${c.locked ? ' · 固定不能交换' : ''}`;
+    parts.push(`<div class="${cls}" data-i="${i}" title="${title}">${inner}${badge}</div>`);
+  }
+
+  board.innerHTML = parts.join('');
+  updateStatus(a);
+  layoutCells();
+}
+
+function updateStatus(a) {
+  const dot = $('statusDot');
+  const textEl = $('statusText');
+  let text = '';
+  let tone = 'warn';
+
+  if (a.tiles === 0) {
+    text = '棋盘是空的：先从调色板选择方块，再点进格子放置。';
+    tone = 'warn';
+  } else if (a.solved) {
+    text = (S.solutionCells ? '这是解法：' : '已连通：') + '所有通路端都接上了，所有有通路的石板连成一整片。';
+    tone = 'ok';
+  } else {
+    const prefix = S.previewCells ? `第 ${S.stepIndex} 步之后：` : '';
+    const bits = [];
+    if (a.unmatched > 0) bits.push(`${a.unmatched} 个通路端还悬着`);
+    if (a.compCount > 1) bits.push(`目前分成 ${a.compCount} 片`);
+    text = prefix + (bits.length ? bits.join('，') : '还有通路没有接上');
+    tone = 'warn';
+  }
+
+  textEl.textContent = text;
+  dot.className = 'dot' + (tone === 'ok' ? ' ok' : tone === 'warn' ? ' warn' : '');
+
+  $('stats').textContent =
+    `石板 ${a.tiles} · 有通路 ${a.armCells} · 通路端 ${a.armsTotal} · 已接通 ${a.armsTotal - a.unmatched} · 连通片 ${a.compCount}`;
+}
+
+function layoutCells() {
+  const stage = document.querySelector('.stage');
+  const stageW = stage ? stage.clientWidth : 0;
+  const availW = Math.max(150, Math.min((stageW || 500) - 48, 540));
+  const gap = 5;
+  let cell = Math.floor((availW - (S.cols - 1) * gap) / S.cols);
+  cell = Math.min(cell, 82, Math.floor((560 - (S.rows - 1) * gap) / S.rows));
+  cell = Math.max(30, cell);
+  document.documentElement.style.setProperty('--cell', cell + 'px');
+}
+
+function renderTools() {
+  document.querySelectorAll('.tool').forEach(b => {
+    b.classList.toggle('active', b.dataset.tool === S.tool);
+  });
+  document.querySelectorAll('.shape').forEach(b => {
+    b.classList.toggle('active', S.tool === 'paint' && Number(b.dataset.type) === S.paintType);
+  });
+}
+
+function renderAll() {
+  renderBoard();
+  renderTools();
+}
+
+/* ---------- 结果面板 ---------- */
+function defaultResult() {
+  return '<div class="result-note">点击「计算答案」，会给出最终布局，并把需要的交换步骤列出来。</div>';
+}
+
+function setResult(html) {
+  $('result').innerHTML = html;
+}
+
+function markStep(k) {
+  document.querySelectorAll('.step').forEach(b => {
+    b.classList.toggle('active', Number(b.dataset.k) === k);
+  });
+}
+
+function showSolutionResult() {
+  const steps = S.steps;
+  const rowsHTML = steps.map((st, k) =>
+    `<button class="step" data-k="${k + 1}">${k + 1}. 交换 ${coord(st.a)} ⇄ ${coord(st.b)}</button>`
+  ).join('');
+
+  setResult(`
+    <div class="result-title ok">找到解 · 共 ${steps.length} 步交换</div>
+    <div class="result-note">点击任意步骤可查看那一步之后的棋盘，黄色表示已经接通的通路。</div>
+    <div class="steps">
+      <button class="step" data-k="0">初始棋盘</button>
+      ${rowsHTML}
+      <button class="step" data-k="${steps.length}">最终答案</button>
+    </div>
+    <div class="result-actions">
+      <button class="btn primary small" id="btnApply">应用到棋盘</button>
+      <button class="btn ghost small" id="btnRestore">返回原布局</button>
+    </div>
+  `);
+  markStep(steps.length);
+}
+
+function previewAt(k) {
+  if (!S.solutionCells) return;
+  if (k >= S.steps.length) {
+    S.previewCells = null;
+    S.stepIndex = -1;
+  } else {
+    const cells = S.snapshot.map(c => ({ ...c }));
+    for (let t = 0; t < k; t++) {
+      const { a, b } = S.steps[t];
+      const tmp = cells[a].type;
+      cells[a].type = cells[b].type;
+      cells[b].type = tmp;
+    }
+    S.previewCells = cells;
+    S.stepIndex = k;
+  }
+  renderBoard();
+  markStep(k);
+}
+
+function applySolution() {
+  if (!S.solutionCells) return;
+  S.cells = S.solutionCells.map(c => ({ type: c.type, locked: !!c.locked }));
+  resetSolution();
+  setResult('<div class="result-title ok">已应用解法。</div><div class="result-note">棋盘现在处于连通状态，可以继续编辑或重新求解。</div>');
+  renderAll();
+}
+
+function restoreOriginal() {
+  if (!S.snapshot) return;
+  S.cells = S.snapshot.map(c => ({ ...c }));
+  resetSolution();
+  setResult('<div class="result-note">已返回求解前的布局。</div>');
+  renderAll();
+}
+
+function errorHTML(res) {
+  let msg = '没有找到解。';
+  if (res.reason === 'parity') msg = '所有通路端的总数是奇数，无法两两配对，这个布局无解。';
+  else if (res.reason === 'edges') msg = '通路数量太少，无法把所有石板连成一片。';
+  else if (res.reason === 'fixed') msg = `固定石板 ${coord(res.index)} 上有一条通路接不出去。`;
+  else if (res.reason === 'limit') msg = '搜索超出上限，未能找到解（可能是无解，或存在大量对称布局）。';
+  else if (res.reason === 'search') msg = '已穷尽搜索：只靠交换石板无法完成这个布局。';
+  return `<div class="result-title bad">${msg}</div><div class="result-note">调整方块后可以再次计算。</div>`;
+}
+
+function onSolve() {
+  if (S.busy) return;
+  if (S.solutionCells) {
+    toast('当前正在预览解法，先点「返回原布局」或「应用到棋盘」');
+    return;
+  }
+
+  const a = analyze(S.cells, S.rows, S.cols);
+  if (a.tiles === 0) {
+    setResult('<div class="result-title bad">棋盘是空的。</div><div class="result-note">先放一些石板再求解。</div>');
+    return;
+  }
+  if (a.solved) {
+    setResult('<div class="result-title ok">当前棋盘已经连通，不需要交换。</div>');
+    return;
+  }
+
+  S.busy = true;
+  setResult('<div class="result-note">正在计算…</div>');
+
+  setTimeout(() => {
+    const snapshot = S.cells.map(c => ({ ...c }));
+    let res;
+    try {
+      res = solveBoard(S.cells, S.rows, S.cols);
+    } catch (err) {
+      console.error(err);
+      res = { ok: false, reason: 'error' };
+    }
+    S.busy = false;
+
+    if (!res.ok) {
+      setResult(errorHTML(res));
+      return;
+    }
+
+    const stepRes = buildSteps(snapshot, res.types, S.rows, S.cols);
+    if (!stepRes.ok) {
+      setResult('<div class="result-title bad">求解结果校验失败。</div><div class="result-note">请检查布局中的固定石板。</div>');
+      return;
+    }
+
+    S.snapshot = snapshot;
+    S.solTypes = res.types;
+    S.solutionCells = S.cells.map((c, i) => ({ type: res.types[i], locked: !!c.locked }));
+    S.steps = stepRes.steps;
+    S.previewCells = null;
+    S.stepIndex = -1;
+
+    renderAll();
+    showSolutionResult();
+  }, 40);
+}
+
+/* ---------- 编辑操作 ---------- */
+function toast(msg) {
+  const t = $('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(toast._timer);
+  toast._timer = setTimeout(() => t.classList.remove('show'), 1600);
+}
+
+function noteEdited() {
+  if (S.solutionCells) {
+    resetSolution();
+    setResult(defaultResult());
+  }
+}
+
+function setCellType(i, type) {
+  if (!editable()) return;
+  const cell = S.cells[i];
+  if (!cell) return;
+  cell.type = type;
+  cell.locked = (type === 0);
+  noteEdited();
+  S.selected = null;
+  renderAll();
+}
+
+function toggleLock(i) {
+  if (!editable()) return;
+  const cell = S.cells[i];
+  if (!cell || cell.type === null || cell.type === undefined || cell.type === 0) return;
+  cell.locked = !cell.locked;
+  noteEdited();
+  renderAll();
+}
+
+function trySwap(i, j) {
+  if (!editable()) return;
+  if (i === j) return;
+  const a = S.cells[i], b = S.cells[j];
+  const aOK = a && a.type !== null && a.type > 0 && !a.locked;
+  const bOK = b && b.type !== null && b.type > 0 && !b.locked;
+  if (!aOK || !bOK) {
+    toast('空位和无通路石板不能参与交换');
+    return;
+  }
+  S.cells[i] = b;
+  S.cells[j] = a;
+  noteEdited();
+  S.selected = null;
+  renderAll();
+}
+
+function handleCellAction(i, shift) {
+  if (!editable()) {
+    toast('正在预览解法，请先返回或应用');
+    return;
+  }
+  if (shift) { toggleLock(i); return; }
+
+  if (S.tool === 'paint') {
+    setCellType(i, S.paintType);
+    return;
+  }
+  if (S.tool === 'erase') {
+    setCellType(i, null);
+    return;
+  }
+
+  // swap 工具
+  const cell = S.cells[i];
+  if (!cell || cell.type === null || cell.type === undefined || cell.type === 0) {
+    toast('空位不能参与交换');
+    return;
+  }
+  if (S.selected === null) {
+    S.selected = i;
+    renderBoard();
+    return;
+  }
+  if (S.selected === i) {
+    S.selected = null;
+    renderBoard();
+    return;
+  }
+  const from = S.selected;
+  trySwap(from, i);
+}
+
+/* ---------- 创建 / 载入 ---------- */
+function setBoard(rows, cols, cells) {
+  S.rows = rows;
+  S.cols = cols;
+  S.cells = cells;
+  $('inRows').value = rows;
+  $('inCols').value = cols;
+  resetSolution();
+  setResult(defaultResult());
+  renderAll();
+}
+
+function newEmptyCells(rows, cols) {
+  return new Array(rows * cols).fill(0).map(() => ({ type: null, locked: false }));
+}
+
+function buildPalette() {
+  const wrap = $('palette');
+  const order = Array.from({ length: 16 }, (_, i) => i)
+    .sort((a, b) => popcount(a) - popcount(b) || a - b);
+
+  wrap.innerHTML = order.map(t => {
+    const label = t === 0 ? '无通路（固定石板）' : armName(t);
+    const inner = t === 0
+      ? '<span class="blank-mark">无通路</span>'
+      : tileSVG(t, t);
+    return `<button class="shape" data-type="${t}" draggable="true" title="${label}">${inner}${t === 0 ? '<span class="badge">固</span>' : ''}</button>`;
+  }).join('');
+}
+
+/* ---------- 事件绑定 ---------- */
+let dragState = null;
+
+function bindEvents() {
+  const board = $('board');
+
+  board.addEventListener('pointerdown', e => {
+    if (e.button !== 0) return;
+    if (!editable()) return;
+    const el = e.target.closest('.cell');
+    if (!el || !board.contains(el)) return;
+    const i = Number(el.dataset.i);
+    dragState = { i, x: e.clientX, y: e.clientY, moved: false, el, shift: e.shiftKey };
+    e.preventDefault();
+  });
+
+  window.addEventListener('pointermove', e => {
+    if (!dragState) return;
+    const dx = e.clientX - dragState.x;
+    const dy = e.clientY - dragState.y;
+    if (!dragState.moved && Math.hypot(dx, dy) > 7) {
+      dragState.moved = true;
+      dragState.el.classList.add('dragging');
+    }
+    if (dragState.moved) {
+      const over = e.target && e.target.closest ? e.target.closest('.cell') : null;
+      document.querySelectorAll('.cell.drop-hint').forEach(c => c.classList.remove('drop-hint'));
+      if (over && over !== dragState.el) over.classList.add('drop-hint');
+    }
+  });
+
+  window.addEventListener('pointerup', e => {
+    if (!dragState) return;
+    const st = dragState;
+    dragState = null;
+    st.el.classList.remove('dragging');
+    document.querySelectorAll('.cell.drop-hint').forEach(c => c.classList.remove('drop-hint'));
+
+    if (!st.moved) {
+      handleCellAction(st.i, st.shift);
+      return;
+    }
+
+    const el = document.elementFromPoint(e.clientX, e.clientY);
+    const target = el && el.closest ? el.closest('.cell') : null;
+    if (target && board.contains(target)) {
+      const j = Number(target.dataset.i);
+      if (j !== st.i) trySwap(st.i, j);
+    }
+  });
+
+  board.addEventListener('contextmenu', e => {
+    e.preventDefault();
+    if (!editable()) return;
+    const el = e.target.closest('.cell');
+    if (!el) return;
+    setCellType(Number(el.dataset.i), null);
+  });
+
+  // 调色板：点击选中、拖拽到格子
+  const palette = $('palette');
+  palette.addEventListener('click', e => {
+    const b = e.target.closest('.shape');
+    if (!b) return;
+    S.tool = 'paint';
+    S.paintType = Number(b.dataset.type);
+    S.selected = null;
+    renderTools();
+  });
+  palette.addEventListener('dragstart', e => {
+    const b = e.target.closest('.shape');
+    if (!b) return;
+    e.dataTransfer.setData('text/plain', b.dataset.type);
+    e.dataTransfer.effectAllowed = 'copy';
+  });
+
+  board.addEventListener('dragover', e => {
+    if (!editable()) return;
+    const el = e.target.closest('.cell');
+    if (!el) return;
+    e.preventDefault();
+    el.classList.add('drop-hint');
+  });
+  board.addEventListener('dragleave', e => {
+    const el = e.target.closest('.cell');
+    if (el) el.classList.remove('drop-hint');
+  });
+  board.addEventListener('drop', e => {
+    if (!editable()) return;
+    const el = e.target.closest('.cell');
+    if (!el) return;
+    e.preventDefault();
+    el.classList.remove('drop-hint');
+    const t = Number(e.dataTransfer.getData('text/plain'));
+    if (!Number.isInteger(t) || t < 0 || t > 15) return;
+    setCellType(Number(el.dataset.i), t);
+  });
+
+  document.querySelectorAll('.tool').forEach(b => {
+    b.addEventListener('click', () => {
+      S.tool = b.dataset.tool;
+      S.selected = null;
+      renderTools();
+      renderBoard();
+    });
+  });
+
+  $('btnRebuild').addEventListener('click', () => {
+    const rows = Math.max(2, Math.min(8, Number($('inRows').value) || 4));
+    const cols = Math.max(2, Math.min(8, Number($('inCols').value) || 4));
+    setBoard(rows, cols, newEmptyCells(rows, cols));
+    toast(`已重建 ${rows} × ${cols} 空棋盘`);
+  });
+
+  $('btnClear').addEventListener('click', () => {
+    setBoard(S.rows, S.cols, newEmptyCells(S.rows, S.cols));
+    toast('已清空');
+  });
+
+  $('btnSample').addEventListener('click', () => {
+    setBoard(5, 4, makeSampleCells());
+    toast('已载入示例（已随机打乱）');
+  });
+
+  $('btnRandom').addEventListener('click', () => {
+    setBoard(S.rows, S.cols, generateRandomCells(S.rows, S.cols));
+    toast('已生成随机谜题');
+  });
+
+  $('btnSolve').addEventListener('click', onSolve);
+
+  $('result').addEventListener('click', e => {
+    const step = e.target.closest('.step');
+    if (step) { previewAt(Number(step.dataset.k)); return; }
+    if (e.target.closest('#btnApply')) { applySolution(); return; }
+    if (e.target.closest('#btnRestore')) { restoreOriginal(); }
+  });
+
+  window.addEventListener('resize', () => layoutCells());
+}
+
+function initApp() {
+  buildPalette();
+  bindEvents();
+  setBoard(5, 4, makeSampleCells());
+}
+
+if (typeof document !== 'undefined' && document.getElementById && document.getElementById('board')) {
+  initApp();
+}
+</script>
+</body>
+</html>
